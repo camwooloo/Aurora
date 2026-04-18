@@ -35,6 +35,19 @@ fn js_fire(script: String) {
 pub fn App() -> Element {
     let state = use_context_provider(|| AppState::new());
 
+    // On mobile, the forecast panel takes up ~half the screen; start with it
+    // closed so the map gets the full width. User can toggle via bottom nav.
+    use_effect(move || {
+        spawn(async move {
+            let v = js_call(r#"dioxus.send(window.innerWidth);"#.to_string()).await;
+            if let Some(w) = v.as_f64() {
+                if w < 768.0 {
+                    let mut d = state.detail_open; d.set(false);
+                }
+            }
+        });
+    });
+
     // Boot the Leaflet map + subscribe to events
     use_effect(move || {
         // Initialize the map (fire-and-forget; ends with dioxus.send(null))
@@ -1108,12 +1121,14 @@ fn MobileNav() -> Element {
                 "Forecast"
             }
             button {
-                onclick: move |_| { let mut p = state.premium_open; p.set(true); },
+                onclick: move |_| { let mut d = state.downloads_open; d.set(true); },
                 svg { width: "20", height: "20", view_box: "0 0 24 24", fill: "none",
-                      stroke: "#ffb347", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round",
-                    path { d: "M3 8l4 9 5-6 5 6 4-9-4 3-5-5-5 5z" }
+                      stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round",
+                    path { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }
+                    path { d: "M7 10l5 5 5-5" }
+                    path { d: "M12 15V3" }
                 }
-                "Premium"
+                "Get app"
             }
         }
     }

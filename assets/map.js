@@ -89,9 +89,19 @@
   }
 
   async function init(containerId) {
-    showDebugBanner('init: waiting for Leaflet…');
+    state.initCount = (state.initCount || 0) + 1;
+    installDebugOverlay();
+    showDebugBanner('init #' + state.initCount + ': waiting for Leaflet…');
+    // Guard against double-init: if a previous init() already created a map,
+    // bail out before destroying anything. Dioxus can fire use_effect twice
+    // on StrictMode-like double-mount; the second call would tear down the
+    // live map mid-animation.
+    if (state.map) {
+      showDebugBanner('init #' + state.initCount + ': map already exists, skipping');
+      return;
+    }
     await waitForLeaflet();
-    showDebugBanner('init: Leaflet loaded');
+    showDebugBanner('init #' + state.initCount + ': Leaflet loaded');
 
     const el = document.getElementById(containerId);
     if (!el) {
@@ -100,8 +110,6 @@
     }
     const rect = el.getBoundingClientRect();
     showDebugBanner('init: #map found, size ' + Math.round(rect.width) + '×' + Math.round(rect.height));
-
-    if (state.map) { state.map.remove(); state.map = null; }
 
     try {
       state.map = L.map(el, {
@@ -180,6 +188,28 @@
     showDebugBanner('map ready — tap to dismiss');
     const banner = document.getElementById('aurora-debug');
     if (banner) setTimeout(() => banner.remove(), 5000);
+  }
+
+  // -------- diagnostic overlay -----------------------------------------
+  // Set ?debug=1 on the URL to show a live state readout in the top-right.
+  // Helps diagnose layer-switch bugs on devices we can't remote into.
+  function installDebugOverlay() {
+    if (!/[?&]debug=1\b/.test(location.search)) return;
+    const el = document.createElement('div');
+    el.id = 'aurora-diag';
+    el.style.cssText = 'position:fixed;top:8px;right:8px;z-index:99999;background:rgba(11,14,20,.85);color:#e6eaf2;padding:8px 10px;border:1px solid #ff9f1c;border-radius:6px;font:11px/1.35 ui-monospace,monospace;pointer-events:none;max-width:260px;white-space:pre';
+    document.body.appendChild(el);
+    setInterval(() => {
+      const vel = document.querySelectorAll('.velocity-overlay').length;
+      const gibsPanes = Array.from(document.querySelectorAll('.leaflet-pane')).filter(p => /gibs/.test(p.className)).length;
+      const gibsTiles = Array.from(document.querySelectorAll('img.leaflet-tile')).filter(i => /gibs/.test(i.src||'')).length;
+      el.textContent =
+        `initCount=${state.initCount||0} layer=${state.currentLayer}\n` +
+        `map=${!!state.map} windData=${!!state.windData}\n` +
+        `velocityLayer=${!!state.velocityLayer} velCanvas=${vel}\n` +
+        `cloudLayers=${state.cloudLayers?.length||0} gibsPanes=${gibsPanes} gibsTiles=${gibsTiles}\n` +
+        `pendingLayer=${state.pendingLayer||'-'}`;
+    }, 500);
   }
 
   function ensureVelocityLayer() {
