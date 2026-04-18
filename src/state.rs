@@ -136,6 +136,7 @@ pub struct AppState {
     pub playing: Signal<bool>,
     pub layer_menu_open: Signal<bool>,
     pub premium_open: Signal<bool>,
+    pub downloads_open: Signal<bool>,
     pub detail_open: Signal<bool>,
     pub tab: Signal<Tab>,
     pub selected: Signal<Option<GeoPlace>>,
@@ -156,6 +157,7 @@ impl AppState {
             playing: Signal::new(false),
             layer_menu_open: Signal::new(false),
             premium_open: Signal::new(false),
+            downloads_open: Signal::new(false),
             detail_open: Signal::new(true),
             tab: Signal::new(Tab::Hourly),
             selected: Signal::new(Some(GeoPlace {

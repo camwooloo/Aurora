@@ -200,6 +200,9 @@ pub fn App() -> Element {
             if (state.premium_open)() {
                 PremiumModal {}
             }
+            if (state.downloads_open)() {
+                DownloadsModal {}
+            }
 
             Toast {}
             MobileNav {}
@@ -436,6 +439,14 @@ fn Rail() -> Element {
             path { d: "M3 8l4 9 5-6 5 6 4-9-4 3-5-5-5 5z" }
         }
     };
+    let icon_download = rsx! {
+        svg { width: "20", height: "20", view_box: "0 0 24 24", fill: "none",
+              stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round",
+            path { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }
+            path { d: "M7 10l5 5 5-5" }
+            path { d: "M12 15V3" }
+        }
+    };
 
     rsx! {
         nav { class: "rail",
@@ -515,6 +526,12 @@ fn Rail() -> Element {
                 span { class: "tip", "Fullscreen" }
             }
             div { class: "sep" }
+            button {
+                title: "Download",
+                onclick: move |_| { let mut o = state.downloads_open; o.set(true); },
+                {icon_download}
+                span { class: "tip", "Download apps" }
+            }
             button {
                 title: "Premium",
                 onclick: move |_| { let mut o = state.premium_open; o.set(true); },
@@ -956,6 +973,55 @@ fn PremiumModal() -> Element {
                 }
                 div { class: "foot",
                     "No payment required. This is a self-hosted weather app."
+                }
+            }
+        }
+    }
+}
+
+// =========================================================================
+
+#[component]
+fn DownloadsModal() -> Element {
+    let state = use_context::<AppState>();
+    let close = move |_| { let mut o = state.downloads_open; o.set(false); };
+
+    rsx! {
+        div { class: "modal-bg", onclick: close.clone(),
+            div {
+                class: "modal",
+                onclick: move |evt| evt.stop_propagation(),
+                button { class: "close", onclick: close.clone(), "✕" }
+                div { class: "hero",
+                    div { class: "logo", "A" }
+                    div {
+                        h2 { "Download AuroraCast" }
+                        p { "Run locally, offline — same weather maps." }
+                    }
+                }
+                div { class: "body",
+                    div { class: "tier active",
+                        div {
+                            div { class: "t", "Windows (x64)" }
+                            div { class: "sub", "~1 MB zip · extract and run aurora-cast.exe · needs WebView2 (bundled on Windows 11)" }
+                        }
+                        a {
+                            class: "price",
+                            href: "/downloads/AuroraCast-windows.zip",
+                            download: "AuroraCast-windows.zip",
+                            "Download"
+                        }
+                    }
+                    div { class: "tier",
+                        div {
+                            div { class: "t", "Android (.apk)" }
+                            div { class: "sub", "Coming soon — Android build pipeline not yet wired up." }
+                        }
+                        div { class: "price", style: "opacity: .5", "Soon" }
+                    }
+                }
+                div { class: "foot",
+                    "Web version at aurora.you. Source on GitHub."
                 }
             }
         }
