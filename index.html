@@ -387,19 +387,33 @@ a{color:var(--accent);text-decoration:none}
    Exposes window.AuroraMap. Called from Rust via dioxus::document::eval.
    ===================================================================== */
 
-// Dioxus 0.7 monkey-patches console.log to JSON-stringify all arguments and
-// forward them to the devtools panel. Leaflet/Velocity layers hold circular
-// references, so stringify THROWS — and the exception propagates out of
-// `console.log`, breaking the callbacks that called it (e.g. velocityLayer
-// onAdd). Wrap the patched methods so they never throw into our code.
-(function hardenConsole() {
-  ['log', 'warn', 'info', 'debug', 'error'].forEach(m => {
-    const orig = console[m];
-    if (typeof orig !== 'function') return;
-    console[m] = function () {
-      try { return orig.apply(console, arguments); } catch (_) { /* ignore */ }
+// Dioxus 0.7 monkey-patches console.log/info/warn to JSON.stringify their
+// arguments and forward to the devtools websocket. Leaflet/Velocity layer
+// instances hold circular references (`_map` ↔ `_handlers[].x._map`), so
+// stringify THROWS — the exception propagates out of `console.log` and
+// breaks whatever called it (e.g. leaflet-velocity's `onAdd`). Fix by
+// making JSON.stringify safe for circular refs globally. Dioxus patches
+// the console AFTER our script runs, so patching console here doesn't
+// work; patching JSON.stringify does, because the patched console.log
+// calls OUR JSON.stringify.
+(function safeJsonStringify() {
+  const orig = JSON.stringify;
+  JSON.stringify = function (value, replacer, space) {
+    const seen = new WeakSet();
+    const safeReplacer = function (key, val) {
+      if (typeof val === 'object' && val !== null) {
+        if (seen.has(val)) return '[Circular]';
+        seen.add(val);
+      }
+      if (typeof replacer === 'function') return replacer.call(this, key, val);
+      return val;
     };
-  });
+    try {
+      return orig.call(this, value, safeReplacer, space);
+    } catch (_) {
+      return '"[unserializable]"';
+    }
+  };
 })();
 
 (function () {
@@ -705,7 +719,9 @@ a{color:var(--accent);text-decoration:none}
     const halfH = (vb.getNorth() - vb.getSouth()) / 2 * (1 + pad);
     const halfW = (vb.getEast() - vb.getWest()) / 2 * (1 + pad);
 
-    const ROWS = 9, COLS = 12;      // 108 points — safely under URL limit
+    // Denser grid gives detail similar to Windy's model resolution.
+    // 18×24 = 432 points stays well under URL + payload limits.
+    const ROWS = 18, COLS = 24;
     const lats = [], lons = [];
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
@@ -746,6 +762,26 @@ a{color:var(--accent);text-decoration:none}
     renderCloudFrame(cloudHourIdx);
   }
 
+  // Pre-seeded noise field for stippling texture (recomputed on layer init).
+  let cloudNoise = null;
+  function ensureCloudNoise(W, H) {
+    if (cloudNoise && cloudNoise.w === W && cloudNoise.h === H) return cloudNoise;
+    const data = new Float32Array(W * H);
+    // Multi-octave noise for cloud-like texture.
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        let v = 0, amp = 1, frq = 0.01;
+        for (let o = 0; o < 4; o++) {
+          v += amp * Math.sin(x * frq * 2.1 + Math.cos(y * frq * 1.7) * 3);
+          amp *= 0.5; frq *= 2.1;
+        }
+        data[y * W + x] = (v + 2) / 4;      // roughly 0..1
+      }
+    }
+    cloudNoise = { w: W, h: H, data };
+    return cloudNoise;
+  }
+
   function renderCloudFrame(hourIdx) {
     if (!cloudGrid || !state.map) return;
     cloudHourIdx = hourIdx;
@@ -757,7 +793,7 @@ a{color:var(--accent);text-decoration:none}
     const canvas = document.createElement('canvas');
     canvas.width = W; canvas.height = H;
     const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, W, H);
+    const img = ctx.createImageData(W, H);
 
     // Compute pixel coords + values for this hour.
     const pts = [];
@@ -765,28 +801,47 @@ a{color:var(--accent);text-decoration:none}
       const px = state.map.latLngToContainerPoint([lats[i], lons[i]]);
       const val = hourly[i] && hourly[i].length > hourIdx ? hourly[i][hourIdx] : null;
       if (val == null) continue;
-      pts.push({ x: px.x, y: px.y, v: val / 100 });     // v ∈ 0..1
+      pts.push({ x: px.x, y: px.y, v: val });     // 0..100 %
     }
+    if (!pts.length) return;
 
-    // Radius sized so neighbors overlap → smooth field. Roughly half the
-    // diagonal distance between adjacent grid points.
-    const radius = Math.max(W, H) / 6;
+    // Inverse-distance-weighted interpolation at every (STEP-downsampled) pixel.
+    // Power 3 keeps local variation without blurring everything into one blob.
+    const noise = ensureCloudNoise(W, H);
+    const STEP = 3;
+    for (let y = 0; y < H; y += STEP) {
+      for (let x = 0; x < W; x += STEP) {
+        let num = 0, den = 0;
+        for (const p of pts) {
+          const dx = x - p.x, dy = y - p.y;
+          const d2 = dx*dx + dy*dy + 1;
+          const w = 1 / (d2 * Math.sqrt(d2));     // power 3
+          num += p.v * w;
+          den += w;
+        }
+        let cloudPct = num / den;                 // 0..100
 
-    // Paint soft white radial gradients, alpha-scaled by cloud fraction.
-    // Using 'lighter' composite so overlapping cloud patches brighten
-    // additively (mimicking density).
-    ctx.globalCompositeOperation = 'lighter';
-    for (const p of pts) {
-      const a = Math.min(0.55, p.v * 0.8);
-      if (a < 0.02) continue;
-      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius);
-      g.addColorStop(0,   `rgba(235, 240, 250, ${a})`);
-      g.addColorStop(0.5, `rgba(235, 240, 250, ${a * 0.5})`);
-      g.addColorStop(1,   'rgba(235, 240, 250, 0)');
-      ctx.fillStyle = g;
-      ctx.fillRect(p.x - radius, p.y - radius, radius * 2, radius * 2);
+        // Add fine-scale noise modulation (±15 pct) so the cloud field has
+        // Windy-style grainy texture instead of one blob.
+        const n = noise.data[y * W + x];
+        cloudPct = Math.max(0, Math.min(100, cloudPct * (0.75 + n * 0.5)));
+
+        // Alpha = cloud fraction, capped so even overcast shows basemap.
+        const a = Math.round(Math.min(230, cloudPct * 2.2));
+        const i0 = (y * W + x) * 4;
+        for (let sy = 0; sy < STEP && y + sy < H; sy++) {
+          const row = (y + sy) * W * 4;
+          for (let sx = 0; sx < STEP && x + sx < W; sx++) {
+            const i = row + (x + sx) * 4;
+            img.data[i]     = 238;
+            img.data[i + 1] = 242;
+            img.data[i + 2] = 250;
+            img.data[i + 3] = a;
+          }
+        }
+      }
     }
-    ctx.globalCompositeOperation = 'source-over';
+    ctx.putImageData(img, 0, 0);
 
     const vb = state.map.getBounds();
     const dataUrl = canvas.toDataURL('image/png');
