@@ -1045,12 +1045,16 @@ fn DownloadsModal() -> Element {
                             div { class: "t", "Android (.apk) · arm64-v8a" }
                             div { class: "sub", "Debug-signed · enable \"Install unknown apps\" for your browser · rolling release from CI" }
                         }
+                        // Link to the releases page rather than the .apk URL.
+                        // Mobile browsers (esp. Brave) sometimes get stuck on the
+                        // "Downloading…" UI when fetching the .apk directly; the
+                        // releases page gives a reliable tap-to-download surface.
                         a {
                             class: "price",
-                            href: "https://github.com/camwooloo/Aurora/releases/download/android-latest/AuroraCast.apk",
+                            href: "https://github.com/camwooloo/Aurora/releases/tag/android-latest",
                             target: "_blank",
                             rel: "noopener",
-                            "Download"
+                            "Get APK"
                         }
                     }
                 }
@@ -1135,14 +1139,26 @@ fn MobileNav() -> Element {
                 "Forecast"
             }
             button {
-                onclick: move |_| { let mut d = state.downloads_open; d.set(true); },
+                onclick: move |_| { let mut o = state.premium_open; o.set(true); },
                 svg { width: "20", height: "20", view_box: "0 0 24 24", fill: "none",
                       stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round",
-                    path { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }
-                    path { d: "M7 10l5 5 5-5" }
-                    path { d: "M12 15V3" }
+                    path { d: "M12 2l2.39 4.84L20 8l-4 3.9.94 5.5L12 14.8 7.06 17.4 8 11.9 4 8l5.61-1.16L12 2z" }
                 }
-                "Get app"
+                "Premium"
+            }
+            // "Get app" only appears on the mobile website. Inside the installed
+            // APK the button is meaningless — you already have the app.
+            if cfg!(not(feature = "mobile")) {
+                button {
+                    onclick: move |_| { let mut d = state.downloads_open; d.set(true); },
+                    svg { width: "20", height: "20", view_box: "0 0 24 24", fill: "none",
+                          stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round",
+                        path { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }
+                        path { d: "M7 10l5 5 5-5" }
+                        path { d: "M12 15V3" }
+                    }
+                    "Get app"
+                }
             }
         }
     }

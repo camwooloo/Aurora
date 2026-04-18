@@ -408,27 +408,21 @@
   // all to the map and later removing them all. LayerGroup doesn't play
   // nicely with per-layer pane options in Leaflet 1.9.
   function buildCloudsLayers(hourOffset) {
-    const date = gibsDateFromHourOffset(hourOffset || 0);
     const dateTime = gibsHourlyFromHourOffset(hourOffset || 0);
     // Layer stack (bottom to top):
     //   Blue Marble   — seamless cloud-free earth, fills gaps globally
-    //   MODIS Terra   — daily true-color, global. 10:30 local pass.
-    //   MODIS Aqua    — daily true-color, global. 13:30 local pass.
     //   GOES-East     — geostationary hourly imagery over Americas+Atlantic.
     //   Himawari      — geostationary hourly imagery over Asia+Pacific.
     //   Meteosat-0deg — geostationary hourly imagery over Europe+Africa.
-    // All weather imagery uses `screen` blend so clouds pop white against
-    // the basemap. The three geostationary layers together cover most of
-    // the globe with sub-hourly updates; MODIS and Blue Marble fill the
-    // remainder (poles) and provide a stable fallback if a geo source is
-    // temporarily unavailable.
+    // MODIS Terra/Aqua were previously in this stack but removed: they're
+    // swath (not geostationary) data, and the satellite's ground track leaves
+    // visible diagonal seams where swath edges and partial-coverage tiles
+    // meet at the boundary with neighbouring orbits. The three geostationary
+    // layers cover most of the inhabited globe continuously, so dropping
+    // MODIS trades slightly grainier polar coverage for a clean look.
     return [
       buildGibsLayer('BlueMarble_NextGeneration', 8, 'jpeg',
         { opacity: 0.55, blend: 'normal' }),
-      buildGibsLayer('MODIS_Terra_CorrectedReflectance_TrueColor', 9, 'jpg',
-        { opacity: 0.7, blend: 'screen', date }),
-      buildGibsLayer('MODIS_Aqua_CorrectedReflectance_TrueColor', 9, 'jpg',
-        { opacity: 0.7, blend: 'screen', date }),
       buildGibsLayer('GOES-East_ABI_GeoColor', 7, 'png',
         { opacity: 0.9, blend: 'screen', date: dateTime }),
       buildGibsLayer('Himawari_AHI_Band13_Clean_Infrared', 6, 'png',
