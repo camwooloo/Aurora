@@ -386,6 +386,22 @@ a{color:var(--accent);text-decoration:none}
    AuroraCast — map controller (Leaflet + wind particles + API bridge)
    Exposes window.AuroraMap. Called from Rust via dioxus::document::eval.
    ===================================================================== */
+
+// Dioxus 0.7 monkey-patches console.log to JSON-stringify all arguments and
+// forward them to the devtools panel. Leaflet/Velocity layers hold circular
+// references, so stringify THROWS — and the exception propagates out of
+// `console.log`, breaking the callbacks that called it (e.g. velocityLayer
+// onAdd). Wrap the patched methods so they never throw into our code.
+(function hardenConsole() {
+  ['log', 'warn', 'info', 'debug', 'error'].forEach(m => {
+    const orig = console[m];
+    if (typeof orig !== 'function') return;
+    console[m] = function () {
+      try { return orig.apply(console, arguments); } catch (_) { /* ignore */ }
+    };
+  });
+})();
+
 (function () {
   'use strict';
 
