@@ -262,9 +262,9 @@
         setSatFrame(state.satFrames.length - 1);
         break;
       case 'clouds':
-        // Blue Marble base (fills MODIS swath gaps) + Terra + Aqua true-color
-        // imagery screen-blended on top. Timeline scrub steps the date.
-        lastCloudDate = null;
+        // Blue Marble + MODIS daily + GOES/Himawari/Meteosat hourly geo.
+        // Timeline scrub shifts the hourly layers each hour.
+        lastCloudKey = null;
         updateCloudsForTime(0);
         break;
       case 'snow':
@@ -384,12 +384,24 @@
     });
   }
 
-  // Given a timeline hour offset (0..239, where 0 = now and larger = further
-  // back in the past), produce a YYYY-MM-DD string for GIBS daily imagery.
+  // Given a timeline hour offset, produce a YYYY-MM-DD string for GIBS
+  // daily imagery (MODIS, Blue Marble). Timeline h increments forward; we
+  // map forward scrubbing onto past days since satellite imagery has no
+  // future data. Offset by 1 day so yesterday's processed imagery is
+  // available for h=0.
   function gibsDateFromHourOffset(h) {
     const daysBack = Math.floor(h / 24);
     const d = new Date(Date.now() - (1 + daysBack) * 86400_000);
     return d.toISOString().slice(0, 10);
+  }
+
+  // Hourly version for geostationary imagery (GOES, Himawari) — returns an
+  // ISO timestamp snapped to the top of the hour. h=0 → latest whole hour
+  // minus a small processing lag; each step forward goes one hour back.
+  function gibsHourlyFromHourOffset(h) {
+    const t = new Date(Date.now() - (h + 1) * 3600_000);
+    t.setUTCMinutes(0, 0, 0);
+    return t.toISOString().replace(/\.\d{3}Z$/, 'Z');
   }
 
   // Returns an array of tile layers. Caller is responsible for adding them
@@ -397,26 +409,42 @@
   // nicely with per-layer pane options in Leaflet 1.9.
   function buildCloudsLayers(hourOffset) {
     const date = gibsDateFromHourOffset(hourOffset || 0);
-    // Base: Blue Marble (seamless cloud-free earth) fills MODIS swath gaps
-    // with natural terrain instead of black bands.
-    // Top: MODIS Terra + Aqua true-color, screen-blended so clouds pop white.
-    // Terra and Aqua pass at different times (~10:30 vs 13:30 local) so
-    // stacking them reduces gap coverage further.
+    const dateTime = gibsHourlyFromHourOffset(hourOffset || 0);
+    // Layer stack (bottom to top):
+    //   Blue Marble   — seamless cloud-free earth, fills gaps globally
+    //   MODIS Terra   — daily true-color, global. 10:30 local pass.
+    //   MODIS Aqua    — daily true-color, global. 13:30 local pass.
+    //   GOES-East     — geostationary hourly imagery over Americas+Atlantic.
+    //   Himawari      — geostationary hourly imagery over Asia+Pacific.
+    //   Meteosat-0deg — geostationary hourly imagery over Europe+Africa.
+    // All weather imagery uses `screen` blend so clouds pop white against
+    // the basemap. The three geostationary layers together cover most of
+    // the globe with sub-hourly updates; MODIS and Blue Marble fill the
+    // remainder (poles) and provide a stable fallback if a geo source is
+    // temporarily unavailable.
     return [
       buildGibsLayer('BlueMarble_NextGeneration', 8, 'jpeg',
-        { opacity: 0.55, blend: 'normal', pane: 'aurora-gibs-base' }),
+        { opacity: 0.55, blend: 'normal' }),
       buildGibsLayer('MODIS_Terra_CorrectedReflectance_TrueColor', 9, 'jpg',
-        { opacity: 0.85, blend: 'screen', date }),
+        { opacity: 0.7, blend: 'screen', date }),
       buildGibsLayer('MODIS_Aqua_CorrectedReflectance_TrueColor', 9, 'jpg',
-        { opacity: 0.85, blend: 'screen', date }),
+        { opacity: 0.7, blend: 'screen', date }),
+      buildGibsLayer('GOES-East_ABI_GeoColor', 7, 'png',
+        { opacity: 0.9, blend: 'screen', date: dateTime }),
+      buildGibsLayer('Himawari_AHI_Band13_Clean_Infrared', 6, 'png',
+        { opacity: 0.55, blend: 'screen', date: dateTime }),
+      buildGibsLayer('Meteosat-0deg_MeteosatGEO_Band13', 6, 'png',
+        { opacity: 0.55, blend: 'screen', date: dateTime }),
     ];
   }
 
-  let lastCloudDate = null;
+  let lastCloudKey = null;
   function updateCloudsForTime(hourOffset) {
-    const date = gibsDateFromHourOffset(hourOffset);
-    if (date === lastCloudDate) return;
-    lastCloudDate = date;
+    // Key includes the hourly component so scrubbing one hour at a time
+    // triggers a fresh tile fetch for the geostationary layers.
+    const key = gibsHourlyFromHourOffset(hourOffset);
+    if (key === lastCloudKey) return;
+    lastCloudKey = key;
     removeCloudLayers();
     state.cloudLayers = buildCloudsLayers(hourOffset);
     state.cloudLayers.forEach(l => l.addTo(state.map));
