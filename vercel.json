@@ -1,0 +1,6 @@
+{
+  "buildCommand": "bash ./vercel-build.sh",
+  "outputDirectory": "target/dx/aurora-cast/release/web/public",
+  "installCommand": "echo skip",
+  "framework": null
+}
