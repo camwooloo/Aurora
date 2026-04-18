@@ -1,0 +1,46 @@
+[package]
+name = "aurora-cast"
+version = "0.1.0"
+edition = "2021"
+authors = ["AuroraCast"]
+description = "Cross-platform weather visualization app (web / desktop / mobile)"
+
+# -----------------------------------------------------------------------------
+# One binary. Pick a platform at build time with --features:
+#   cargo run --features web        # native wasm dev (prefer `dx serve`)
+#   cargo run --features desktop    # desktop window (wry)
+#   cargo run --features mobile     # mobile (iOS/Android via `dx bundle`)
+# -----------------------------------------------------------------------------
+[[bin]]
+name = "aurora-cast"
+path = "src/main.rs"
+
+[features]
+default = ["web"]
+web = ["dioxus/web"]
+desktop = ["dioxus/desktop"]
+mobile = ["dioxus/mobile"]
+
+[dependencies]
+dioxus = { version = "0.7" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "wasmbind"] }
+futures = "0.3"
+
+[profile.wasm-dev]
+inherits = "dev"
+opt-level = 1
+
+[profile.server-dev]
+inherits = "dev"
+
+[profile.android-dev]
+inherits = "dev"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

@@ -1,0 +1,25 @@
+[application]
+name = "aurora-cast"
+default_platform = "web"
+
+[web.app]
+title = "AuroraCast — Interactive Weather"
+base_path = ""
+
+[web.watcher]
+reload_html = true
+watch_path = ["src", "assets"]
+
+# Note: main.css and map.js are referenced from Rust via the `asset!` macro
+# (see src/app.rs), so they're bundled and hashed automatically. Leaflet
+# itself is loaded from a CDN in index.html.
+
+[bundle]
+identifier = "com.auroracast.app"
+publisher = "AuroraCast"
+icon = []
+resources = ["assets/*"]
+copyright = ""
+category = "Weather"
+short_description = "Interactive weather maps"
+long_description = "Cross-platform weather visualization with animated wind, radar, and 10-day forecasts."

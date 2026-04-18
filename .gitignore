@@ -1,0 +1,22 @@
+# Rust build outputs
+/target/
+**/target/
+Cargo.lock.bak
+
+# Dioxus / dx output
+/dist/
+.dioxus/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# Compiled exe copy in project root (rebuilt via cargo)
+/AuroraCast.exe
+/.claude/
