@@ -1141,8 +1141,8 @@ fn MobileNav() -> Element {
             button {
                 onclick: move |_| { let mut o = state.premium_open; o.set(true); },
                 svg { width: "20", height: "20", view_box: "0 0 24 24", fill: "none",
-                      stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round",
-                    path { d: "M12 2l2.39 4.84L20 8l-4 3.9.94 5.5L12 14.8 7.06 17.4 8 11.9 4 8l5.61-1.16L12 2z" }
+                      stroke: "#ffb347", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round",
+                    path { d: "M3 8l4 9 5-6 5 6 4-9-4 3-5-5-5 5z" }
                 }
                 "Premium"
             }
