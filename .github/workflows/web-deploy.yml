@@ -1,0 +1,87 @@
+name: Web (Vercel)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'assets/**'
+      - 'index.html'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Dioxus.toml'
+      - 'vercel.output.json'
+      - '.github/workflows/web-deploy.yml'
+  workflow_dispatch:
+
+# Only one prod deploy in flight at a time — new pushes cancel the older one
+# rather than queueing so a rapid series of commits doesn't trigger multiple
+# Vercel deploys racing to become the alias.
+concurrency:
+  group: vercel-prod
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    # Windows runner so we can build the desktop .zip the Downloads modal
+    # serves at /downloads/AuroraCast-windows.zip — Vercel deploys are
+    # ephemeral (each build is a fresh upload), so the zip must be staged
+    # on every run rather than trusting a previous deploy's file.
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable + wasm target)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: 'true'
+
+      - name: Install dioxus-cli
+        run: cargo install dioxus-cli --locked
+
+      - name: Build Windows desktop
+        shell: pwsh
+        run: dx bundle --platform desktop --release --target x86_64-pc-windows-msvc
+
+      - name: Zip Windows desktop
+        shell: pwsh
+        run: |
+          $app = "target/dx/aurora-cast/release/windows/app"
+          $zip = "target/dx/aurora-cast/release/windows/AuroraCast-windows.zip"
+          Compress-Archive -Path "$app/*" -DestinationPath $zip -Force
+
+      - name: Build web bundle
+        run: dx bundle --platform web --release
+
+      - name: Stage downloads + vercel.json
+        shell: pwsh
+        run: |
+          $web = "target/dx/aurora-cast/release/web/public"
+          New-Item -ItemType Directory -Force -Path "$web/downloads" | Out-Null
+          Copy-Item "target/dx/aurora-cast/release/windows/AuroraCast-windows.zip" "$web/downloads/"
+          Copy-Item "vercel.output.json" "$web/vercel.json"
+
+      - name: Install Vercel CLI
+        run: npm install -g vercel@latest
+
+      # VERCEL_ORG_ID + VERCEL_PROJECT_ID env vars tell the CLI which project
+      # to deploy to without needing `vercel link` (which writes .vercel/
+      # inside the working dir). Requires three secrets on the repo:
+      #   VERCEL_TOKEN      — personal token from vercel.com/account/tokens
+      #   VERCEL_ORG_ID     — team_yO98wnQ3ZQLU9cKH6rZl9PvR
+      #   VERCEL_PROJECT_ID — prj_TJQu8Z4TwPk940k7lZzGouloxNte
+      - name: Deploy to Vercel
+        shell: pwsh
+        working-directory: target/dx/aurora-cast/release/web/public
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: vercel deploy --prod --yes --token=$env:VERCEL_TOKEN
