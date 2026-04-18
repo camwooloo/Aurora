@@ -41,7 +41,6 @@
     rainLayer: null,
     satLayer: null,
     tempLayer: null,
-    cloudLayer: null,
     overlayLayer: null,
     rainFrames: [],
     satFrames: [],
@@ -186,10 +185,10 @@
     if (!state.map) return;
     // remove everything
     [state.velocityLayer, state.rainLayer, state.satLayer,
-     state.tempLayer, state.cloudLayer, state.overlayLayer].forEach(l => {
+     state.tempLayer, state.overlayLayer].forEach(l => {
       if (l && state.map.hasLayer(l)) state.map.removeLayer(l);
     });
-    state.rainLayer = state.satLayer = state.tempLayer = state.cloudLayer = state.overlayLayer = null;
+    state.rainLayer = state.satLayer = state.tempLayer = state.overlayLayer = null;
 
     switch (name) {
       case 'wind':
@@ -202,10 +201,10 @@
         setSatFrame(state.satFrames.length - 1);
         break;
       case 'clouds':
-        // Windy-style clouds: real forecast cloud cover %, rendered as soft
-        // white patches with alpha = cloud%. Basemap shows through. All 240
-        // hours are fetched once, so timeline scrub is instant (no network).
-        loadAndRenderClouds();
+        // MODIS Terra true-color satellite imagery, screen-blended so bright
+        // clouds pop and ocean/land stay dark. Daily granularity — timeline
+        // scrub steps the date back through recent days.
+        state.overlayLayer = buildCloudsLayer(0).addTo(state.map);
         break;
       case 'snow':
         state.overlayLayer = buildGibsLayer(
@@ -242,18 +241,6 @@
     const idx = Math.max(0, Math.min(state.satFrames.length - 1, i));
     state.satLayer = L.tileLayer(state.satFrames[idx], { opacity: 0.7, maxZoom: 12 }).addTo(state.map);
   }
-  // Clouds use the same IR satellite source but in its own layer slot with
-  // a lower opacity so the basemap stays readable underneath.
-  function setCloudFrame(i) {
-    if (state.cloudLayer) state.map.removeLayer(state.cloudLayer);
-    if (!state.satFrames.length) return;
-    const idx = Math.max(0, Math.min(state.satFrames.length - 1, i));
-    state.cloudLayer = L.tileLayer(state.satFrames[idx], {
-      opacity: 0.55,  // lighter than the Satellite layer so map shows through
-      maxZoom: 12,
-    }).addTo(state.map);
-  }
-
   function setTime(hourOffset, totalHours) {
     if (!state.map) return;
     const frac = hourOffset / totalHours;
@@ -264,14 +251,7 @@
       setSatFrame(Math.floor(frac * state.satFrames.length));
     }
     if (state.currentLayer === 'clouds') {
-      if (cloudGrid) {
-        // Pure canvas re-paint from cached forecast → smooth dragging
-        const hours = (cloudGrid.hourly[0] || []).length;
-        const h = Math.min(hours - 1, Math.max(0, hourOffset));
-        renderCloudFrame(h);
-      } else {
-        loadAndRenderClouds();  // first call triggers the fetch
-      }
+      updateCloudsForTime(hourOffset);
     }
     if (state.currentLayer === 'snow') {
       // Step snow overlay one MODIS frame per day of timeline offset.
@@ -304,173 +284,6 @@
 
   function invalidate() {
     if (state.map) state.map.invalidateSize();
-  }
-
-  // -------- Windy-style cloud overlay (Open-Meteo forecast grid) ------
-  // Fetches hourly cloud cover % for a grid of points covering the map,
-  // then paints soft white circles (alpha = cloud%) onto a canvas. Scrubbing
-  // the timeline is instant because all 240 hours are cached locally.
-  let cloudGrid = null;           // {lats, lons, hourly[point][hour], bounds}
-  let cloudHourIdx = 0;
-  let cloudLoading = false;
-  let cloudAbort = null;
-
-  async function loadAndRenderClouds() {
-    if (!state.map) return;
-    // Reuse cache if viewport still roughly covered
-    const vb = state.map.getBounds();
-    if (cloudGrid && cloudGrid.bounds.contains(vb.getCenter())) {
-      renderCloudFrame(cloudHourIdx);
-      return;
-    }
-    if (cloudLoading) return;
-    cloudLoading = true;
-    if (cloudAbort) cloudAbort.abort();
-    cloudAbort = new AbortController();
-
-    // Build a grid covering ~2x the visible viewport so pans feel continuous.
-    const pad = 0.8;
-    const cLat = (vb.getNorth() + vb.getSouth()) / 2;
-    const cLon = (vb.getWest() + vb.getEast()) / 2;
-    const halfH = (vb.getNorth() - vb.getSouth()) / 2 * (1 + pad);
-    const halfW = (vb.getEast() - vb.getWest()) / 2 * (1 + pad);
-
-    // Denser grid gives detail similar to Windy's model resolution.
-    // 18×24 = 432 points stays well under URL + payload limits.
-    const ROWS = 18, COLS = 24;
-    const lats = [], lons = [];
-    for (let r = 0; r < ROWS; r++) {
-      for (let c = 0; c < COLS; c++) {
-        const lat = Math.max(-85, Math.min(85,
-          cLat + halfH - (r + 0.5) * (2 * halfH) / ROWS));
-        let lon = cLon - halfW + (c + 0.5) * (2 * halfW) / COLS;
-        lon = ((lon + 540) % 360) - 180;
-        lats.push(lat.toFixed(3));
-        lons.push(lon.toFixed(3));
-      }
-    }
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lats.join(',')}&longitude=${lons.join(',')}&hourly=cloud_cover&forecast_days=10&timezone=UTC`;
-
-    showDebugBanner('Clouds: fetching forecast grid…');
-    let arr;
-    try {
-      const r = await fetch(url, { signal: cloudAbort.signal });
-      const j = await r.json();
-      arr = Array.isArray(j) ? j : [j];
-    } catch (e) {
-      cloudLoading = false;
-      if (e.name !== 'AbortError') showDebugBanner('Clouds fetch failed: ' + e.message);
-      return;
-    }
-
-    cloudGrid = {
-      lats: lats.map(Number),
-      lons: lons.map(Number),
-      hourly: arr.map(p => (p && p.hourly && p.hourly.cloud_cover) || []),
-      bounds: L.latLngBounds(
-        [cLat - halfH, cLon - halfW],
-        [cLat + halfH, cLon + halfW]
-      ),
-    };
-    cloudLoading = false;
-    const banner = document.getElementById('aurora-debug');
-    if (banner) banner.remove();
-    renderCloudFrame(cloudHourIdx);
-  }
-
-  // Pre-seeded noise field for stippling texture (recomputed on layer init).
-  let cloudNoise = null;
-  function ensureCloudNoise(W, H) {
-    if (cloudNoise && cloudNoise.w === W && cloudNoise.h === H) return cloudNoise;
-    const data = new Float32Array(W * H);
-    // Multi-octave noise for cloud-like texture.
-    for (let y = 0; y < H; y++) {
-      for (let x = 0; x < W; x++) {
-        let v = 0, amp = 1, frq = 0.01;
-        for (let o = 0; o < 4; o++) {
-          v += amp * Math.sin(x * frq * 2.1 + Math.cos(y * frq * 1.7) * 3);
-          amp *= 0.5; frq *= 2.1;
-        }
-        data[y * W + x] = (v + 2) / 4;      // roughly 0..1
-      }
-    }
-    cloudNoise = { w: W, h: H, data };
-    return cloudNoise;
-  }
-
-  function renderCloudFrame(hourIdx) {
-    if (!cloudGrid || !state.map) return;
-    cloudHourIdx = hourIdx;
-    const { lats, lons, hourly } = cloudGrid;
-
-    const size = state.map.getSize();
-    const W = Math.max(512, Math.round(size.x));
-    const H = Math.max(384, Math.round(size.y));
-    const canvas = document.createElement('canvas');
-    canvas.width = W; canvas.height = H;
-    const ctx = canvas.getContext('2d');
-    const img = ctx.createImageData(W, H);
-
-    // Compute pixel coords + values for this hour.
-    const pts = [];
-    for (let i = 0; i < lats.length; i++) {
-      const px = state.map.latLngToContainerPoint([lats[i], lons[i]]);
-      const val = hourly[i] && hourly[i].length > hourIdx ? hourly[i][hourIdx] : null;
-      if (val == null) continue;
-      pts.push({ x: px.x, y: px.y, v: val });     // 0..100 %
-    }
-    if (!pts.length) return;
-
-    // Inverse-distance-weighted interpolation at every (STEP-downsampled) pixel.
-    // Power 3 keeps local variation without blurring everything into one blob.
-    const noise = ensureCloudNoise(W, H);
-    const STEP = 3;
-    for (let y = 0; y < H; y += STEP) {
-      for (let x = 0; x < W; x += STEP) {
-        let num = 0, den = 0;
-        for (const p of pts) {
-          const dx = x - p.x, dy = y - p.y;
-          const d2 = dx*dx + dy*dy + 1;
-          const w = 1 / (d2 * Math.sqrt(d2));     // power 3
-          num += p.v * w;
-          den += w;
-        }
-        let cloudPct = num / den;                 // 0..100
-
-        // Add fine-scale noise modulation (±15 pct) so the cloud field has
-        // Windy-style grainy texture instead of one blob.
-        const n = noise.data[y * W + x];
-        cloudPct = Math.max(0, Math.min(100, cloudPct * (0.75 + n * 0.5)));
-
-        // Alpha = cloud fraction, capped so even overcast shows basemap.
-        const a = Math.round(Math.min(230, cloudPct * 2.2));
-        const i0 = (y * W + x) * 4;
-        for (let sy = 0; sy < STEP && y + sy < H; sy++) {
-          const row = (y + sy) * W * 4;
-          for (let sx = 0; sx < STEP && x + sx < W; sx++) {
-            const i = row + (x + sx) * 4;
-            img.data[i]     = 238;
-            img.data[i + 1] = 242;
-            img.data[i + 2] = 250;
-            img.data[i + 3] = a;
-          }
-        }
-      }
-    }
-    ctx.putImageData(img, 0, 0);
-
-    const vb = state.map.getBounds();
-    const dataUrl = canvas.toDataURL('image/png');
-    const newOverlay = L.imageOverlay(dataUrl,
-      [[vb.getSouth(), vb.getWest()], [vb.getNorth(), vb.getEast()]],
-      { opacity: 1, interactive: false, className: 'aurora-cloud-overlay' }
-    );
-
-    // Swap overlays in place to avoid flicker.
-    const prev = state.overlayLayer;
-    newOverlay.addTo(state.map);
-    state.overlayLayer = newOverlay;
-    if (prev && state.map.hasLayer(prev)) state.map.removeLayer(prev);
   }
 
   // -------- NASA GIBS satellite tiles (clouds / temp / snow) ----------
@@ -515,18 +328,22 @@
     return d.toISOString().slice(0, 10);
   }
 
+  function buildCloudsLayer(hourOffset) {
+    const date = gibsDateFromHourOffset(hourOffset || 0);
+    return buildGibsLayer(
+      'MODIS_Terra_CorrectedReflectance_TrueColor',
+      9, 'jpg', { opacity: 0.9, blend: 'screen', date }
+    );
+  }
+
   let lastCloudDate = null;
   function updateCloudsForTime(hourOffset) {
     const date = gibsDateFromHourOffset(hourOffset);
     if (date === lastCloudDate) return;
     lastCloudDate = date;
-    if (state.overlayLayer && state.map.hasLayer(state.overlayLayer)) {
-      state.map.removeLayer(state.overlayLayer);
-    }
-    state.overlayLayer = buildGibsLayer(
-      'MODIS_Terra_CorrectedReflectance_TrueColor',
-      9, 'jpg', { opacity: 0.9, blend: 'screen', date }
-    ).addTo(state.map);
+    const prev = state.overlayLayer;
+    state.overlayLayer = buildCloudsLayer(hourOffset).addTo(state.map);
+    if (prev && state.map.hasLayer(prev)) state.map.removeLayer(prev);
   }
 
   // -------- real-data grid overlay (Open-Meteo point sampling) --------
@@ -541,14 +358,6 @@
       state._gridHook = true;
       state.map.on('moveend zoomend', () => {
         const layer = state.currentLayer;
-        if (layer === 'clouds') {
-          // Re-paint from cache; refetch only if viewport drifted far
-          if (cloudGrid && !cloudGrid.bounds.contains(state.map.getBounds().getCenter())) {
-            cloudGrid = null;      // force refetch
-          }
-          loadAndRenderClouds();
-          return;
-        }
         if (['temp','pressure','waves'].includes(layer)) {
           clearTimeout(gridRefreshTimer);
           if (gridAbortCtrl) gridAbortCtrl.abort();
