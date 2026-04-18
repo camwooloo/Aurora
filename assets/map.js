@@ -43,6 +43,7 @@
     tempLayer: null,
     overlayLayer: null,
     cloudLayers: null,    // array of GIBS tile layers (base + Terra + Aqua)
+    windData: null,       // cached wind JSON, used to lazily build velocityLayer
     rainFrames: [],
     satFrames: [],
     markers: [],
@@ -135,22 +136,23 @@
       subdomains: 'abcd', maxZoom: 19, pane: 'aurora-labels',
     }).addTo(state.map);
 
-    // Initialize wind particles
+    // Prefetch wind data but defer layer construction until the user is
+    // actually on the Wind layer — leaflet-velocity's constructor injects a
+    // canvas into the overlay pane regardless of addTo, which would render
+    // particles over whatever layer the user has currently selected.
     try {
       const r = await fetch(WIND_JSON_URL);
-      const data = await r.json();
-      state.velocityLayer = L.velocityLayer({
-        displayValues: false,
-        data,
-        maxVelocity: 25,
-        velocityScale: 0.012,
-        particleAge: 80,
-        lineWidth: 1.4,
-        particleMultiplier: 0.004,
-        colorScale: ['#1a3a6e', '#4aa3ff', '#5cd389', '#ffd166', '#ff9f1c', '#ff6b6b', '#9b4dca'],
-      });
-      if (state.currentLayer === 'wind') state.velocityLayer.addTo(state.map);
+      state.windData = await r.json();
     } catch (e) { console.warn('wind init failed', e); }
+
+    // Replay any setLayer call that landed before state.map was ready.
+    if (state.pendingLayer) {
+      const pending = state.pendingLayer;
+      state.pendingLayer = null;
+      setLayer(pending);
+    } else if (state.currentLayer) {
+      setLayer(state.currentLayer);
+    }
 
     // RainViewer frames
     try {
@@ -180,10 +182,26 @@
     if (banner) setTimeout(() => banner.remove(), 5000);
   }
 
+  function ensureVelocityLayer() {
+    if (state.velocityLayer || !state.windData || !state.map) return;
+    state.velocityLayer = L.velocityLayer({
+      displayValues: false,
+      data: state.windData,
+      maxVelocity: 25,
+      velocityScale: 0.012,
+      particleAge: 80,
+      lineWidth: 1.4,
+      particleMultiplier: 0.004,
+      colorScale: ['#1a3a6e', '#4aa3ff', '#5cd389', '#ffd166', '#ff9f1c', '#ff6b6b', '#9b4dca'],
+    });
+  }
+
   // -------- layer switching -------------------------------------------
   function setLayer(name) {
     state.currentLayer = name;
-    if (!state.map) return;
+    // Rust fires setLayer on mount before the Leaflet map exists. Remember
+    // the latest choice and replay it once init() finishes.
+    if (!state.map) { state.pendingLayer = name; return; }
     // remove everything
     [state.velocityLayer, state.rainLayer, state.satLayer,
      state.tempLayer, state.overlayLayer].forEach(l => {
@@ -192,8 +210,17 @@
     state.rainLayer = state.satLayer = state.tempLayer = state.overlayLayer = null;
     removeCloudLayers();
 
+    // leaflet-velocity's onRemove doesn't always drop its canvas, so any
+    // subsequent render paints particles on top of the new layer. Belt-and-
+    // suspenders: strip any stray velocity canvases from the DOM whenever
+    // we aren't on the wind layer.
+    if (name !== 'wind') {
+      document.querySelectorAll('.velocity-overlay').forEach(c => c.remove());
+    }
+
     switch (name) {
       case 'wind':
+        ensureVelocityLayer();
         if (state.velocityLayer) state.velocityLayer.addTo(state.map);
         break;
       case 'rain':

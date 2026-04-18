@@ -1,0 +1,91 @@
+name: Android APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'assets/**'
+      - 'index.html'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Dioxus.toml'
+      - '.github/workflows/android-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-34 build-tools;34.0.0 ndk;26.1.10909125 platform-tools'
+
+      - name: Export NDK env
+        run: |
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
+          echo "NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: 'true'
+
+      - name: Install dioxus-cli
+        run: cargo install dioxus-cli --locked
+
+      - name: Build APK
+        run: dx bundle --platform android --release --package-types apk
+        env:
+          # Ensure cargo can find the NDK toolchains
+          CC_aarch64_linux_android: ${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang
+          CC_armv7_linux_androideabi: ${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi24-clang
+          CC_x86_64_linux_android: ${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android24-clang
+          CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER: ${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang
+          CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER: ${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi24-clang
+          CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER: ${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android24-clang
+
+      - name: Locate and rename APK
+        id: apk
+        run: |
+          SRC=$(find target -name '*.apk' -type f | head -1)
+          mkdir -p dist-android
+          cp "$SRC" dist-android/AuroraCast.apk
+          echo "path=dist-android/AuroraCast.apk" >> "$GITHUB_OUTPUT"
+          echo "Found APK at: $SRC -> dist-android/AuroraCast.apk"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AuroraCast-android
+          path: ${{ steps.apk.outputs.path }}
+          if-no-files-found: error
+
+      - name: Publish to rolling release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-latest
+          name: Android (latest main)
+          body: |
+            Auto-built unsigned debug APK from the latest `main` commit.
+            Install: `adb install AuroraCast.apk` or enable "Install from unknown sources".
+          files: ${{ steps.apk.outputs.path }}
+          prerelease: false

@@ -1015,9 +1015,15 @@ fn DownloadsModal() -> Element {
                     div { class: "tier",
                         div {
                             div { class: "t", "Android (.apk)" }
-                            div { class: "sub", "Coming soon — Android build pipeline not yet wired up." }
+                            div { class: "sub", "Unsigned debug build · install via adb or enable \"Unknown sources\" · rolling release from CI" }
                         }
-                        div { class: "price", style: "opacity: .5", "Soon" }
+                        a {
+                            class: "price",
+                            href: "https://github.com/camwooloo/Aurora/releases/download/android-latest/AuroraCast.apk",
+                            target: "_blank",
+                            rel: "noopener",
+                            "Download"
+                        }
                     }
                 }
                 div { class: "foot",
