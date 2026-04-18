@@ -42,7 +42,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+          targets: aarch64-linux-android
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -52,21 +52,23 @@ jobs:
       - name: Install dioxus-cli
         run: cargo install dioxus-cli --locked
 
+      # Target aarch64-linux-android explicitly — virtually every Android
+      # phone from the last ~8 years is arm64-v8a. The default dx target
+      # on a Linux x86_64 runner ends up x86_64-linux-android, which only
+      # installs on emulators and produces an "app not compatible" error
+      # on real phones.
       - name: Build APK
-        run: dx bundle --platform android --release --package-types apk
+        run: dx bundle --platform android --release --package-types apk --target aarch64-linux-android
         env:
-          # Ensure cargo can find the NDK toolchains
           CC_aarch64_linux_android: ${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang
-          CC_armv7_linux_androideabi: ${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi24-clang
-          CC_x86_64_linux_android: ${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android24-clang
           CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER: ${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang
-          CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER: ${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi24-clang
-          CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER: ${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android24-clang
 
       - name: Locate and rename APK
         id: apk
         run: |
-          SRC=$(find target -name '*.apk' -type f | head -1)
+          # Prefer an arm64/aarch64 APK, fall back to whatever the build produced.
+          SRC=$(find target -name '*.apk' -type f | grep -iE 'arm64|aarch64' | head -1)
+          if [ -z "$SRC" ]; then SRC=$(find target -name '*.apk' -type f | head -1); fi
           mkdir -p dist-android
           cp "$SRC" dist-android/AuroraCast.apk
           echo "path=dist-android/AuroraCast.apk" >> "$GITHUB_OUTPUT"
@@ -85,7 +87,10 @@ jobs:
           tag_name: android-latest
           name: Android (latest main)
           body: |
-            Auto-built unsigned debug APK from the latest `main` commit.
-            Install: `adb install AuroraCast.apk` or enable "Install from unknown sources".
+            Debug-signed APK built from the latest `main` commit, targeting
+            arm64-v8a (aarch64) — covers virtually all modern Android phones.
+
+            Install: enable "Install unknown apps" for your browser (or adb
+            sideload) and open the downloaded file.
           files: ${{ steps.apk.outputs.path }}
           prerelease: false

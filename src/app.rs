@@ -1028,8 +1028,8 @@ fn DownloadsModal() -> Element {
                     }
                     div { class: "tier",
                         div {
-                            div { class: "t", "Android (.apk)" }
-                            div { class: "sub", "Unsigned debug build · install via adb or enable \"Unknown sources\" · rolling release from CI" }
+                            div { class: "t", "Android (.apk) · arm64-v8a" }
+                            div { class: "sub", "Debug-signed · enable \"Install unknown apps\" for your browser · rolling release from CI" }
                         }
                         a {
                             class: "price",
