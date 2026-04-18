@@ -18,10 +18,11 @@ powershell -NoProfile -Command "Compress-Archive -Path '$APP_WIN\\*' -Destinatio
 # 2. Web build
 dx bundle --platform web --release
 
-# 3. Stage downloads next to the web bundle
+# 3. Stage downloads + Vercel config next to the web bundle
 WEB_PUBLIC="$ROOT/target/dx/aurora-cast/release/web/public"
 mkdir -p "$WEB_PUBLIC/downloads"
 cp "$ROOT/$DESKTOP_ZIP" "$WEB_PUBLIC/downloads/"
+cp "$ROOT/vercel.output.json" "$WEB_PUBLIC/vercel.json"
 
 # 4. Deploy
 cd "$WEB_PUBLIC"

@@ -575,6 +575,7 @@ fn LayerMenu() -> Element {
                         class: if cur_layer == l { "active" } else { "" },
                         onclick: move |_| {
                             let mut sig = state.layer; sig.set(l);
+                            show_toast(state, format!("Layer: {}", l.label()));
                         },
                         span { class: "ico", "{ico}" }
                         "{name}"
