@@ -10,6 +10,14 @@ use crate::weather::*;
 // Bundled assets. Dioxus picks these up at build time and includes them in the bundle.
 const MAIN_CSS: Asset = asset!("/assets/main.css");
 const MAP_JS: Asset = asset!("/assets/map.js");
+// Leaflet + leaflet-velocity are bundled locally rather than pulled from unpkg
+// so the Android APK works without relying on the WebView reaching a CDN —
+// Dioxus's mobile shell doesn't carry <head> tags from index.html. We declare
+// the vendor dir as a FOLDER asset because dioxus-cli otherwise runs each .js
+// through esbuild with `--bundle --format=esm`, which wraps Leaflet's UMD in
+// `export default`; a classic <script> then fails to assign window.L. Folder
+// assets copy files verbatim (no esbuild), preserving the UMD behavior.
+const VENDOR: Asset = asset!("/assets/vendor", AssetOptions::folder());
 
 /// Run a JS snippet that must end by calling `dioxus.send(value)`. Returns
 /// the sent value (or Null on error). This uniform pattern keeps the Rust ↔
@@ -189,7 +197,13 @@ pub fn App() -> Element {
     });
 
     rsx! {
+        document::Link { rel: "stylesheet", href: format!("{VENDOR}/leaflet-bundle.css") }
         document::Link { rel: "stylesheet", href: MAIN_CSS }
+        // Leaflet + leaflet-velocity are concatenated into one file. Dioxus
+        // injects Script components via the DOM after parse, which implicitly
+        // sets `async=true` (and `defer` can't override it once injected), so
+        // two separate scripts would race. One file = guaranteed order.
+        document::Script { src: format!("{VENDOR}/leaflet-bundle.js"), defer: true }
         document::Script { src: MAP_JS, defer: true }
 
         div { class: "app",
