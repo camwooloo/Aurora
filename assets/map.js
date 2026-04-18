@@ -203,20 +203,22 @@
     // the latest choice and replay it once init() finishes.
     if (!state.map) { state.pendingLayer = name; return; }
     // remove everything
-    [state.velocityLayer, state.rainLayer, state.satLayer,
-     state.tempLayer, state.overlayLayer].forEach(l => {
+    [state.rainLayer, state.satLayer, state.tempLayer, state.overlayLayer].forEach(l => {
       if (l && state.map.hasLayer(l)) state.map.removeLayer(l);
     });
     state.rainLayer = state.satLayer = state.tempLayer = state.overlayLayer = null;
     removeCloudLayers();
 
-    // leaflet-velocity's onRemove doesn't always drop its canvas, so any
-    // subsequent render paints particles on top of the new layer. Belt-and-
-    // suspenders: strip any stray velocity canvases from the DOM whenever
-    // we aren't on the wind layer.
-    if (name !== 'wind') {
-      document.querySelectorAll('.velocity-overlay').forEach(c => c.remove());
+    // Velocity gets special treatment: leaflet-velocity's onRemove does NOT
+    // clean up its canvas element, and re-using the same layer instance has
+    // been observed to paint particles through subsequent overlays. Nuke
+    // the layer reference AND any stray canvases, then rebuild fresh when
+    // the user returns to wind via ensureVelocityLayer().
+    if (state.velocityLayer) {
+      try { state.map.removeLayer(state.velocityLayer); } catch (_) {}
+      state.velocityLayer = null;
     }
+    document.querySelectorAll('.velocity-overlay').forEach(c => c.remove());
 
     switch (name) {
       case 'wind':
@@ -333,7 +335,10 @@
     const paneName = 'aurora-gibs-' + (opts.blend || 'normal');
     if (!state.map.getPane(paneName)) {
       const pane = state.map.createPane(paneName);
-      pane.style.zIndex = 360;
+      // Leaflet's default overlay pane is z-index 400; render GIBS above it
+      // so clouds always win if any overlay (e.g. leftover velocity canvas)
+      // somehow lingers. Labels pane is 650 so text still sits on top.
+      pane.style.zIndex = 500;
       pane.style.pointerEvents = 'none';
       if (opts.blend) pane.style.mixBlendMode = opts.blend;
     }
