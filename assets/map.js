@@ -42,6 +42,7 @@
     satLayer: null,
     tempLayer: null,
     overlayLayer: null,
+    cloudLayers: null,    // array of GIBS tile layers (base + Terra + Aqua)
     rainFrames: [],
     satFrames: [],
     markers: [],
@@ -189,6 +190,7 @@
       if (l && state.map.hasLayer(l)) state.map.removeLayer(l);
     });
     state.rainLayer = state.satLayer = state.tempLayer = state.overlayLayer = null;
+    removeCloudLayers();
 
     switch (name) {
       case 'wind':
@@ -201,10 +203,10 @@
         setSatFrame(state.satFrames.length - 1);
         break;
       case 'clouds':
-        // MODIS Terra true-color satellite imagery, screen-blended so bright
-        // clouds pop and ocean/land stay dark. Daily granularity — timeline
-        // scrub steps the date back through recent days.
-        state.overlayLayer = buildCloudsLayer(0).addTo(state.map);
+        // Blue Marble base (fills MODIS swath gaps) + Terra + Aqua true-color
+        // imagery screen-blended on top. Timeline scrub steps the date.
+        lastCloudDate = null;
+        updateCloudsForTime(0);
         break;
       case 'snow':
         state.overlayLayer = buildGibsLayer(
@@ -328,12 +330,24 @@
     return d.toISOString().slice(0, 10);
   }
 
-  function buildCloudsLayer(hourOffset) {
+  // Returns an array of tile layers. Caller is responsible for adding them
+  // all to the map and later removing them all. LayerGroup doesn't play
+  // nicely with per-layer pane options in Leaflet 1.9.
+  function buildCloudsLayers(hourOffset) {
     const date = gibsDateFromHourOffset(hourOffset || 0);
-    return buildGibsLayer(
-      'MODIS_Terra_CorrectedReflectance_TrueColor',
-      9, 'jpg', { opacity: 0.9, blend: 'screen', date }
-    );
+    // Base: Blue Marble (seamless cloud-free earth) fills MODIS swath gaps
+    // with natural terrain instead of black bands.
+    // Top: MODIS Terra + Aqua true-color, screen-blended so clouds pop white.
+    // Terra and Aqua pass at different times (~10:30 vs 13:30 local) so
+    // stacking them reduces gap coverage further.
+    return [
+      buildGibsLayer('BlueMarble_NextGeneration', 8, 'jpeg',
+        { opacity: 0.55, blend: 'normal', pane: 'aurora-gibs-base' }),
+      buildGibsLayer('MODIS_Terra_CorrectedReflectance_TrueColor', 9, 'jpg',
+        { opacity: 0.85, blend: 'screen', date }),
+      buildGibsLayer('MODIS_Aqua_CorrectedReflectance_TrueColor', 9, 'jpg',
+        { opacity: 0.85, blend: 'screen', date }),
+    ];
   }
 
   let lastCloudDate = null;
@@ -341,9 +355,15 @@
     const date = gibsDateFromHourOffset(hourOffset);
     if (date === lastCloudDate) return;
     lastCloudDate = date;
-    const prev = state.overlayLayer;
-    state.overlayLayer = buildCloudsLayer(hourOffset).addTo(state.map);
-    if (prev && state.map.hasLayer(prev)) state.map.removeLayer(prev);
+    removeCloudLayers();
+    state.cloudLayers = buildCloudsLayers(hourOffset);
+    state.cloudLayers.forEach(l => l.addTo(state.map));
+  }
+
+  function removeCloudLayers() {
+    if (!state.cloudLayers) return;
+    state.cloudLayers.forEach(l => { if (state.map.hasLayer(l)) state.map.removeLayer(l); });
+    state.cloudLayers = null;
   }
 
   // -------- real-data grid overlay (Open-Meteo point sampling) --------
