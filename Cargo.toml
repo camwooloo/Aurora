@@ -43,4 +43,6 @@ opt-level = "z"
 lto = true
 codegen-units = 1
 panic = "abort"
-strip = true
+# strip = true disabled: dioxus-cli 0.7.5 on Windows invokes rust-objcopy
+# without the .exe suffix and fails. wasm-opt handles size optimization.
+strip = false

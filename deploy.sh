@@ -4,4 +4,6 @@
 set -euo pipefail
 
 dx bundle --platform web --release
-vercel deploy --prod target/dx/aurora-cast/release/web/public
+cd target/dx/aurora-cast/release/web/public
+vercel link --yes --project aurora
+vercel deploy --prod --yes
